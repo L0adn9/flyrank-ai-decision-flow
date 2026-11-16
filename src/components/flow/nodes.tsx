@@ -2,11 +2,11 @@
 
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 
-import type { DecisionNode, OutcomeNode } from "@/lib/graph";
+import type { DecisionNode, NodeRunState, OutcomeNode } from "@/lib/graph";
 import { BRANCH_COLORS } from "@/lib/graph";
 import { cn } from "@/lib/utils";
 
-export type NodeRunState = "idle" | "active" | "yes" | "no" | "reached" | "failed";
+export type { NodeRunState };
 
 const ring: Record<NodeRunState, string> = {
   idle: "border-border",
@@ -17,10 +17,8 @@ const ring: Record<NodeRunState, string> = {
   failed: "border-red-700 ring-4 ring-red-400",
 };
 
-type WithRunState = { runState?: NodeRunState };
-
 export function DecisionNodeView({ data, selected }: NodeProps<DecisionNode>) {
-  const state = (data as WithRunState).runState ?? "idle";
+  const state = data.runState ?? "idle";
   return (
     <div
       className={cn(
@@ -51,7 +49,7 @@ export function DecisionNodeView({ data, selected }: NodeProps<DecisionNode>) {
 }
 
 export function OutcomeNodeView({ data, selected }: NodeProps<OutcomeNode>) {
-  const state = (data as WithRunState).runState ?? "idle";
+  const state = data.runState ?? "idle";
   return (
     <div
       className={cn(

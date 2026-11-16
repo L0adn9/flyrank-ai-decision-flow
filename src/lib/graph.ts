@@ -2,9 +2,12 @@ import type { Edge, Node } from "@xyflow/react";
 
 export type Branch = "yes" | "no";
 
-/** A decision asks the LLM a YES/NO question; an outcome is where a path ends. */
-export type DecisionData = { label: string; prompt: string };
-export type OutcomeData = { label: string };
+export type NodeRunState = "idle" | "active" | "yes" | "no" | "reached" | "failed";
+
+/** A decision asks the LLM a YES/NO question; an outcome is where a path ends.
+ *  runState is only set on the copy shown on the canvas during a run - never saved. */
+export type DecisionData = { label: string; prompt: string; runState?: NodeRunState };
+export type OutcomeData = { label: string; runState?: NodeRunState };
 
 export type DecisionNode = Node<DecisionData, "decision">;
 export type OutcomeNode = Node<OutcomeData, "outcome">;
@@ -39,7 +42,7 @@ export const DEFAULT_WORKFLOW: Workflow = {
       position: { x: 260, y: 20 },
       data: {
         label: "Support request?",
-        prompt: "Is this message a support request about a problem with a product the sender already uses?",
+        prompt: "Is this message a support request from an existing customer about a problem (e.g. login or account trouble, an error, a bug, something broken)?",
       },
     },
     {
@@ -48,7 +51,7 @@ export const DEFAULT_WORKFLOW: Workflow = {
       position: { x: 40, y: 220 },
       data: {
         label: "Urgent?",
-        prompt: "Does this message describe something broken, blocked or urgent (outage, cannot log in, data loss)?",
+        prompt: "Is it urgent: is the sender blocked right now or facing a deadline (outage, data loss, needed today, within the hour)?",
       },
     },
     {
@@ -57,7 +60,7 @@ export const DEFAULT_WORKFLOW: Workflow = {
       position: { x: 480, y: 220 },
       data: {
         label: "Buying interest?",
-        prompt: "Is the sender asking about prices, plans, a demo or buying the product?",
+        prompt: "Is the sender interested in buying: asking about prices, pricing plans, a quote or a trial?",
       },
     },
     { id: "support-urgent", type: "outcome", position: { x: -60, y: 440 }, data: { label: "Page on-call support" } },
@@ -92,7 +95,8 @@ export function loadWorkflow(): Workflow {
 
 export function saveWorkflow(workflow: Workflow): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(workflow));
+    const nodes = workflow.nodes.map((n) => ({ ...n, data: { ...n.data, runState: undefined } }));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...workflow, nodes }));
   } catch {
     // storage blocked: the editor still works, it just won't persist
   }

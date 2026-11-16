@@ -28,7 +28,23 @@ import {
 } from "@/lib/graph";
 import type { Run } from "@/lib/runs";
 
-import { nodeTypes } from "./nodes";
+import { nodeTypes, type NodeRunState } from "./nodes";
+import { ExecutionLog, RunHistory } from "./RunPanel";
+
+type RunSummary = Omit<Run, "workflow"> & { nodeCount: number };
+
+/** Visual execution state for each node, derived from a run. */
+function nodeStates(run: Run | null): Map<string, NodeRunState> {
+  const states = new Map<string, NodeRunState>();
+  if (!run) return states;
+  for (const step of run.steps) {
+    if (step.kind === "outcome") states.set(step.nodeId, "reached");
+    else if (step.error) states.set(step.nodeId, "failed");
+    else if (step.answer) states.set(step.nodeId, step.answer === "YES" ? "yes" : "no");
+  }
+  if (run.activeNodeId) states.set(run.activeNodeId, "active");
+  return states;
+}
 
 let counter = 0;
 const newId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${counter++}`;
@@ -41,13 +57,30 @@ export function FlowEditor() {
   const [input, setInput] = useState("Hi, I can't log in to my account since this morning and I have a demo in an hour!");
   const [run, setRun] = useState<Run | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  const [history, setHistory] = useState<RunSummary[]>([]);
+  const [ioError, setIoError] = useState<string | null>(null);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   const stopPolling = () => {
     if (poll.current) clearInterval(poll.current);
     poll.current = null;
   };
   useEffect(() => stopPolling, []);
+
+  const refreshHistory = useCallback(async () => {
+    const r = await fetch("/api/runs");
+    if (r.ok) setHistory(await r.json());
+  }, []);
+  useEffect(() => {
+    refreshHistory();
+  }, [refreshHistory]);
+
+  const showRun = async (id: string) => {
+    stopPolling();
+    const r = await fetch(`/api/runs/${id}`);
+    if (r.ok) setRun(await r.json());
+  };
 
   const startRun = async () => {
     stopPolling();
@@ -68,7 +101,10 @@ export function FlowEditor() {
       if (!r.ok) return;
       const latest: Run = await r.json();
       setRun(latest);
-      if (latest.status === "completed" || latest.status === "failed") stopPolling();
+      if (latest.status === "completed" || latest.status === "failed") {
+        stopPolling();
+        refreshHistory();
+      }
     }, 600);
   };
 
@@ -131,6 +167,53 @@ export function FlowEditor() {
     setSelectedId(null);
   };
 
+  const exportJson = () => {
+    const blob = new Blob([JSON.stringify({ nodes, edges }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "workflow.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importJson = async (file: File) => {
+    setIoError(null);
+    try {
+      const wf = JSON.parse(await file.text());
+      if (!Array.isArray(wf.nodes) || !Array.isArray(wf.edges)) throw new Error("expected { nodes: [], edges: [] }");
+      const ids = new Set(wf.nodes.map((n: FlowNode) => n.id));
+      const badEdge = wf.edges.find((e: FlowEdge) => !ids.has(e.source) || !ids.has(e.target));
+      if (badEdge) throw new Error(`edge ${badEdge.id} points at a node that doesn't exist`);
+      setNodes(wf.nodes);
+      setEdges(wf.edges.map((e: FlowEdge) => makeEdge(e.source, e.target, e.data?.branch ?? (e.sourceHandle === "no" ? "no" : "yes"))));
+      setSelectedId(null);
+      setRun(null);
+    } catch (err) {
+      setIoError(`Import failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  // Overlay the run on the canvas: node states + animated, highlighted edges along the path taken.
+  const states = useMemo(() => nodeStates(run), [run]);
+  const displayNodes = useMemo(
+    () =>
+      nodes.map((n): FlowNode =>
+        states.has(n.id) ? ({ ...n, data: { ...n.data, runState: states.get(n.id) } } as FlowNode) : n,
+      ),
+    [nodes, states],
+  );
+  const displayEdges = useMemo(() => {
+    if (!run) return edges;
+    const taken = new Set(run.path);
+    const running = run.status === "running" || run.status === "queued";
+    return edges.map((e) =>
+      taken.has(e.id)
+        ? { ...e, animated: true, style: { ...e.style, strokeWidth: 4 } }
+        : { ...e, animated: false, style: { ...e.style, opacity: running || run.path.length ? 0.35 : 1 } },
+    );
+  }, [edges, run]);
+
   return (
     <div className="grid h-dvh grid-cols-1 lg:grid-cols-[1fr_360px]">
       <div className="relative min-h-[60vh] border-r">
@@ -138,10 +221,29 @@ export function FlowEditor() {
           <Button size="sm" onClick={() => addNode("decision")}>+ Decision</Button>
           <Button size="sm" variant="secondary" onClick={() => addNode("outcome")}>+ Outcome</Button>
           <Button size="sm" variant="outline" onClick={resetExample}>Reset example</Button>
+          <Button size="sm" variant="outline" onClick={exportJson}>Export JSON</Button>
+          <Button size="sm" variant="outline" onClick={() => fileInput.current?.click()}>Import JSON</Button>
+          {run ? (
+            <Button size="sm" variant="ghost" onClick={() => setRun(null)}>Clear run</Button>
+          ) : null}
+          <input
+            ref={fileInput}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) importJson(f);
+              e.target.value = "";
+            }}
+          />
         </div>
+        {ioError ? (
+          <p className="absolute left-3 top-14 z-10 rounded bg-destructive px-2 py-1 text-xs text-white">{ioError}</p>
+        ) : null}
         <ReactFlow
-          nodes={nodes}
-          edges={edges}
+          nodes={displayNodes}
+          edges={displayEdges}
           nodeTypes={nodeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
@@ -167,25 +269,9 @@ export function FlowEditor() {
               Run
             </Button>
             {runError ? <p className="text-destructive">{runError}</p> : null}
-            {run ? (
-              <div className="space-y-1">
-                <p>
-                  Status: <strong>{run.status}</strong>
-                  {run.outcome ? <> → <strong>{run.outcome}</strong></> : null}
-                </p>
-                <ol className="list-decimal pl-5">
-                  {run.steps.map((s) => (
-                    <li key={`${s.index}-${s.nodeId}`}>
-                      {s.label}
-                      {s.answer ? `: ${s.answer}` : s.kind === "decision" && !s.error ? " …" : ""}
-                    </li>
-                  ))}
-                </ol>
-                {run.error ? <p className="text-destructive">{run.error}</p> : null}
-              </div>
-            ) : null}
           </CardContent>
         </Card>
+        {run ? <ExecutionLog run={run} /> : null}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">{selected ? "Edit node" : "AI Decision Flow"}</CardTitle>
@@ -218,6 +304,7 @@ export function FlowEditor() {
             )}
           </CardContent>
         </Card>
+        <RunHistory runs={history} activeId={run?.id} onSelect={showRun} onRefresh={refreshHistory} />
       </aside>
     </div>
   );
