@@ -10,7 +10,7 @@ import {
   type Connection,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,6 +26,7 @@ import {
   type FlowEdge,
   type FlowNode,
 } from "@/lib/graph";
+import type { Run } from "@/lib/runs";
 
 import { nodeTypes } from "./nodes";
 
@@ -37,6 +38,39 @@ export function FlowEditor() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>([]);
   const [loaded, setLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [input, setInput] = useState("Hi, I can't log in to my account since this morning and I have a demo in an hour!");
+  const [run, setRun] = useState<Run | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  const poll = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = () => {
+    if (poll.current) clearInterval(poll.current);
+    poll.current = null;
+  };
+  useEffect(() => stopPolling, []);
+
+  const startRun = async () => {
+    stopPolling();
+    setRunError(null);
+    setRun(null);
+    const res = await fetch("/api/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input, workflow: { nodes, edges } }),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      setRunError(body.error ?? `HTTP ${res.status}`);
+      return;
+    }
+    poll.current = setInterval(async () => {
+      const r = await fetch(`/api/runs/${body.runId}`);
+      if (!r.ok) return;
+      const latest: Run = await r.json();
+      setRun(latest);
+      if (latest.status === "completed" || latest.status === "failed") stopPolling();
+    }, 600);
+  };
 
   // Load once on the client (localStorage doesn't exist during server rendering).
   useEffect(() => {
@@ -123,6 +157,35 @@ export function FlowEditor() {
       </div>
 
       <aside className="flex flex-col gap-4 overflow-y-auto p-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Run the workflow</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <Textarea rows={4} value={input} onChange={(e) => setInput(e.target.value)} />
+            <Button onClick={startRun} disabled={!input.trim() || run?.status === "running" || run?.status === "queued"}>
+              Run
+            </Button>
+            {runError ? <p className="text-destructive">{runError}</p> : null}
+            {run ? (
+              <div className="space-y-1">
+                <p>
+                  Status: <strong>{run.status}</strong>
+                  {run.outcome ? <> → <strong>{run.outcome}</strong></> : null}
+                </p>
+                <ol className="list-decimal pl-5">
+                  {run.steps.map((s) => (
+                    <li key={`${s.index}-${s.nodeId}`}>
+                      {s.label}
+                      {s.answer ? `: ${s.answer}` : s.kind === "decision" && !s.error ? " …" : ""}
+                    </li>
+                  ))}
+                </ol>
+                {run.error ? <p className="text-destructive">{run.error}</p> : null}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader>
             <CardTitle className="text-base">{selected ? "Edit node" : "AI Decision Flow"}</CardTitle>
