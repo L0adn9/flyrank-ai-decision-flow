@@ -1,36 +1,38 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Decision Flow
 
-## Getting Started
+A visual workflow editor where every node is an AI decision that answers **YES** or **NO**.
+The graph is drawn with [React Flow](https://reactflow.dev), executed step by step with
+[Inngest](https://www.inngest.com), and each decision is made by an LLM through the OpenAI SDK
+(pointed at any OpenAI-compatible provider).
 
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+"Is this a support request?"  --YES-->  Support
+                              --NO--->  Sales
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Stack
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Next.js 15 (App Router) · React Flow (`@xyflow/react`) · Inngest · OpenAI SDK · shadcn/ui · Tailwind
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Setup
 
-## Learn More
+```bash
+npm install
+cp .env.example .env.local      # add LLM_API_KEY, or set LLM_STUB=1 to run without a model
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Run (two terminals)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run dev        # Next.js on http://localhost:3000
+npm run inngest    # Inngest dev server on http://localhost:8288 (discovers /api/inngest)
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Project structure
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+src/app/page.tsx              the editor page
+src/app/api/inngest/route.ts  Inngest serve endpoint
+src/inngest/client.ts         Inngest client
+src/components/ui/            shadcn components
+```
